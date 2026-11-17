@@ -1,4 +1,5 @@
-import { Leaf, MoreHorizontal, Pill, Plus, Printer } from "lucide-react";
+import { useState } from "react";
+import { Leaf, LoaderCircle, MoreHorizontal, Pill, Plus, Printer } from "lucide-react";
 import { dailyDose, depletionForecast, formatDate } from "../dateUtils";
 import { formatAmount } from "../formatAmount";
 import { dosePeriods, type Medication } from "../types";
@@ -8,8 +9,26 @@ export function MedicationListPanel({ medications, onAdd, onEdit, onPrint }: {
   medications: MedicationStock[];
   onAdd: () => void;
   onEdit: (medication: Medication) => void;
-  onPrint: () => void;
+  onPrint: () => void | Promise<void>;
 }) {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+
+  async function exportPdf() {
+    if (exporting) return;
+    setExporting(true);
+    setExportError("");
+    try {
+      await onPrint();
+    } catch (error) {
+      console.error("PDFを作成できませんでした。", error);
+      setExportError("PDFを直接保存できない場合は、印刷画面の「PDFに保存」を選択してください。");
+      window.print();
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <section className="panel medication-panel">
       <div className="panel-heading">
@@ -19,11 +38,15 @@ export function MedicationListPanel({ medications, onAdd, onEdit, onPrint }: {
         </div>
         <div className="medication-panel-actions">
           {medications.length > 0 && (
-            <button type="button" className="print-button" onClick={onPrint}><Printer size={15} />印刷 / PDF</button>
+            <button type="button" className="print-button" onClick={exportPdf} disabled={exporting}>
+              {exporting ? <LoaderCircle className="loading-icon" size={15} /> : <Printer size={15} />}
+              {exporting ? "PDF作成中" : "印刷 / PDF"}
+            </button>
           )}
           <button className="icon-button add-small" aria-label="お薬を追加" onClick={onAdd}><Plus size={19} /></button>
         </div>
       </div>
+      {exportError && <p className="pdf-export-error" role="alert">{exportError}</p>}
       {medications.length === 0 ? (
         <div className="empty-state">
           <span className="empty-illustration"><Pill size={26} /></span>
