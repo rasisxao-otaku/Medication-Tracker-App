@@ -188,6 +188,98 @@ function App() {
     }));
   }
 
+  async function exportMedicationPdf() {
+    if (document.fonts?.ready) await document.fonts.ready;
+
+    const sheet = document.querySelector<HTMLElement>(".medication-print-sheet");
+    if (!sheet) throw new Error("PDF出力シートを表示できませんでした。");
+
+    sheet.classList.add("pdf-capture");
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf")
+      ]);
+      const canvas = await html2canvas(sheet, {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+        width: 794,
+        windowWidth: 794
+      });
+
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const marginX = 12;
+      const marginY = 14;
+      const imageWidth = pageWidth - marginX * 2;
+      const usablePageHeight = pageHeight - marginY * 2;
+      const pixelScale = canvas.width / sheet.scrollWidth;
+      const targetSliceHeight = usablePageHeight * canvas.width / imageWidth;
+      const sheetRect = sheet.getBoundingClientRect();
+      const rowBounds = Array.from(sheet.querySelectorAll<HTMLElement>(
+        ".medication-print-table thead tr, .medication-print-table tbody tr, .medication-print-disclaimer"
+      ))
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return (rect.bottom - sheetRect.top) * pixelScale;
+        })
+        .sort((a, b) => a - b);
+
+      let sourceY = 0;
+      let isFirstPage = true;
+      while (sourceY < canvas.height) {
+        const targetBottom = sourceY + targetSliceHeight;
+        let sourceBottom = targetBottom;
+
+        if (targetBottom < canvas.height) {
+          const safeBounds = rowBounds.filter((bottom) =>
+            bottom > sourceY + 20 && bottom <= targetBottom
+          );
+          if (safeBounds.length > 0) sourceBottom = safeBounds[safeBounds.length - 1];
+          if (sourceBottom <= sourceY) sourceBottom = targetBottom;
+        } else {
+          sourceBottom = canvas.height;
+        }
+
+        const sliceHeight = Math.max(1, Math.ceil(sourceBottom - sourceY));
+        const slice = document.createElement("canvas");
+        slice.width = canvas.width;
+        slice.height = sliceHeight;
+        const context = slice.getContext("2d");
+        if (!context) throw new Error("PDFページを作成できませんでした。");
+        context.drawImage(canvas, 0, sourceY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
+        const imageHeight = sliceHeight * imageWidth / slice.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(slice.toDataURL("image/png"), "PNG", marginX, marginY, imageWidth, imageHeight);
+
+        isFirstPage = false;
+        sourceY = sourceBottom;
+      }
+
+      const fileName = `お薬リスト_${todayKey}.pdf`;
+      const blob = pdf.output("blob");
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      const shareData: ShareData & { files?: File[] } = {
+        files: [file],
+        title: "お薬リスト"
+      };
+      if (navigator.share && navigator.canShare?.(shareData)) {
+        try {
+          await navigator.share(shareData);
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+        }
+      }
+      pdf.save(fileName);
+    } finally {
+      sheet.classList.remove("pdf-capture");
+    }
+  }
+
   return (
     <Dashboard
       today={today}
@@ -216,7 +308,7 @@ function App() {
         medications: currentStocks,
         onAdd: openNewMedication,
         onEdit: openEditMedication,
-        onPrint: () => window.print()
+        onPrint: exportMedicationPdf
       }}
       appointment={{
         appointmentDate: data.appointmentDate,
